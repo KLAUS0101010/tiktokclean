@@ -1,0 +1,123 @@
+name: Build TikTok Clean
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: "Direct link to the official TikTok .apk (see INSTRUCTION-RU.md, step 2)"
+        required: true
+      region:
+        description: "Country the phone should pretend to be in"
+        required: true
+        type: choice
+        default: NL
+        options: [NL, DE, KZ, TR, PL, GB, US, FR, AE]
+      change_system_region:
+        description: "Also change the country part of the system locale (language stays)"
+        required: true
+        type: boolean
+        default: true
+      publish:
+        description: "Also publish the result as a public Release"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+
+      - name: Tests
+        run: |
+          python3 -I tests/test_patch.py
+          mkdir -p out && javac -d out hooks/Region.java hooks/LinkCleaner.java tests/*.java
+          java -cp out dev.clean.RegionTest
+          java -cp out dev.clean.LinkCleanerTest
+
+      - name: Download TikTok
+        env: { APK_URL: "${{ inputs.apk_url }}" }
+        run: |
+          curl -L --fail --retry 3 -o tiktok.apk "$APK_URL"
+          ls -la tiktok.apk
+          unzip -l tiktok.apk | grep -q "AndroidManifest.xml" || { echo "This is not an .apk file (maybe a bundle .xapk/.apks/.apkm or a web page)."; exit 1; }
+          unzip -l tiktok.apk | grep -q "classes.dex" || { echo "No classes.dex inside: not a normal universal apk."; exit 1; }
+
+      - name: Get apktool
+        run: curl -L --fail -o apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar
+
+      - name: Unpack (code only; resources stay exactly as they are)
+        run: java -Xmx5g -jar apktool.jar d -r -f -o dec tiktok.apk
+
+      - name: Report (what is inside the original TikTok)
+        run: |
+          python3 -I analyze_apk.py dec > report.txt
+          { echo '```'; head -c 60000 report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: report.txt
+
+      - name: Build our own small dex (the hooks)
+        env:
+          REGION: ${{ inputs.region }}
+          LOCALE: ${{ inputs.change_system_region }}
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          PLAT=$(ls -d "$ANDROID_HOME"/platforms/android-* | sort -V | tail -1)
+          mkdir -p build/src build/classes build/dex
+          sed "s/__REGION__/${REGION}/; s/__LOCALE__/${LOCALE}/" hooks/Hooks.java.in > build/src/Hooks.java
+          cp hooks/Region.java hooks/LinkCleaner.java build/src/
+          javac --release 8 -cp "$PLAT/android.jar" -d build/classes build/src/*.java
+          "$BT/d8" --release --min-api 21 --lib "$PLAT/android.jar" --output build/dex $(find build/classes -name '*.class')
+          ls -la build/dex
+
+      - name: Patch
+        run: python3 -I patch_tiktok.py dec 2>&1 | tee patch-log.txt
+
+      - name: Repack
+        run: java -Xmx5g -jar apktool.jar b -o unsigned.apk dec
+
+      - name: Add our dex to the apk
+        run: |
+          N=$(unzip -Z1 unsigned.apk | grep -cE '^classes[0-9]*\.dex$')
+          NAME="classes$((N+1)).dex"
+          cp build/dex/classes.dex "$NAME"
+          zip -q unsigned.apk "$NAME"
+          echo "added $NAME (apk had $N dex files)"
+
+      - name: Restore signing key
+        uses: actions/cache@v4
+        with:
+          path: tiktokclean.jks
+          key: tiktokclean-signing-key-v1
+
+      - name: Sign
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          if [ ! -f tiktokclean.jks ]; then
+            keytool -genkeypair -keystore tiktokclean.jks -storepass tiktokclean -keypass tiktokclean \
+              -alias tiktokclean -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=TikTok Clean"
+          fi
+          "$BT/zipalign" -f -p 4 unsigned.apk aligned.apk
+          "$BT/apksigner" sign --ks tiktokclean.jks --ks-pass pass:tiktokclean --key-pass pass:tiktokclean \
+            --out TikTok-Clean.apk aligned.apk
+          "$BT/apksigner" verify --verbose TikTok-Clean.apk | head -5
+          ls -la TikTok-Clean.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TikTok-Clean
+          path: TikTok-Clean.apk
+
+      - name: Publish release (optional)
+        if: ${{ inputs.publish }}
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh release create "tiktok-clean-${{ github.run_number }}" TikTok-Clean.apk --title "TikTok Clean build ${{ github.run_number }}" --notes "Official TikTok with the chosen region and third-party trackers removed. Built from the official apk by patch_tiktok.py."
