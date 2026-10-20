@@ -1,0 +1,10 @@
+package dev.clean;
+
+/** Filled in by the build (see build.yml). */
+final class Config {
+    private Config() {}
+    static final String REGION = "__REGION__";           // region used until the user picks another one in the menu
+    static final boolean CHANGE_SYSTEM_REGION = __LOCALE__;
+    static final int BUILD = __BUILD__;                  // number of this build (GitHub run number)
+    static final String SERVER = "__SERVER__";           // address of the badge/update server, empty = off
+}

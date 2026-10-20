@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Writes tiny fake versions of the Android classes the hooks use, so the hooks can be compile-checked on a normal
+computer (no Android SDK here). The real build uses the real android.jar. Usage: make_stubs.py <out dir>"""
+import sys
+from pathlib import Path
+
+S = {}
+def c(fq, body, kind="class", ext=""):
+    S[fq] = (kind, ext, body)
+
+c("android.os.Bundle", "")
+c("android.os.Looper", "public static Looper getMainLooper(){return null;}")
+c("android.os.Handler", "public Handler(Looper l){} public boolean post(Runnable r){return true;} public boolean postDelayed(Runnable r,long m){return true;}")
+c("android.os.Build", "public static class VERSION{public static int SDK_INT;}")
+c("android.net.Uri", "public static Uri parse(String s){return null;}")
+c("android.content.SharedPreferences", "String getString(String k,String d); Editor edit(); interface Editor{Editor putString(String k,String v); void apply();}", "interface")
+c("android.content.Context", "public static final int MODE_PRIVATE=0; public SharedPreferences getSharedPreferences(String n,int m){return null;} public android.content.res.Resources getResources(){return null;} public java.io.File getCacheDir(){return null;} public Context getApplicationContext(){return null;} public android.content.pm.PackageManager getPackageManager(){return null;} public String getPackageName(){return null;} public void startActivity(Intent i){} public Intent registerReceiver(BroadcastReceiver r,IntentFilter f){return null;} public Intent registerReceiver(BroadcastReceiver r,IntentFilter f,int fl){return null;} public void unregisterReceiver(BroadcastReceiver r){}", ext="", kind="abstract class")
+c("android.content.ContextWrapper", "public Context getBaseContext(){return null;}", "class", "Context")
+c("android.content.Intent", "public static final String ACTION_VIEW=\"\"; public static final String EXTRA_INTENT=\"\"; public static final int FLAG_ACTIVITY_NEW_TASK=1; public Intent(String a){} public Intent(String a,android.net.Uri u){} public Intent addFlags(int f){return this;} public Intent setPackage(String p){return this;} public int getIntExtra(String n,int d){return 0;} public String getStringExtra(String n){return null;} public <T extends android.os.Parcelable> T getParcelableExtra(String n){return null;}")
+c("android.os.Parcelable", "", "interface")
+c("android.content.IntentFilter", "public IntentFilter(String a){}")
+c("android.content.BroadcastReceiver", "public abstract void onReceive(Context c,Intent i);", "abstract class")
+c("android.content.ClipData", "public static class Item{public Item(CharSequence t){} public CharSequence getText(){return null;}} public ClipData(ClipDescription d,Item i){} public int getItemCount(){return 0;} public Item getItemAt(int i){return null;} public void addItem(Item i){} public ClipDescription getDescription(){return null;}")
+c("android.content.ClipDescription", "")
+c("android.content.ClipboardManager", "public void setPrimaryClip(ClipData c){}")
+c("android.content.res.Resources", "public android.util.DisplayMetrics getDisplayMetrics(){return null;}")
+c("android.util.DisplayMetrics", "public float density; public int widthPixels; public int heightPixels;")
+c("android.content.pm.PackageManager", "public PackageInstaller getPackageInstaller(){return null;}", "abstract class")
+c("android.content.pm.PackageInstaller", "public static final String EXTRA_STATUS=\"\",EXTRA_STATUS_MESSAGE=\"\"; public static final int STATUS_PENDING_USER_ACTION=-1,STATUS_SUCCESS=0; public int createSession(SessionParams p) throws java.io.IOException{return 0;} public Session openSession(int i) throws java.io.IOException{return null;} public static class SessionParams{public static final int MODE_FULL_INSTALL=1; public SessionParams(int m){}} public static class Session{public java.io.OutputStream openWrite(String n,long o,long l) throws java.io.IOException{return null;} public void fsync(java.io.OutputStream o) throws java.io.IOException{} public void commit(android.content.IntentSender s){}}")
+c("android.content.IntentSender", "")
+c("android.app.PendingIntent", "public static final int FLAG_UPDATE_CURRENT=1; public static PendingIntent getBroadcast(android.content.Context c,int r,android.content.Intent i,int f){return null;} public android.content.IntentSender getIntentSender(){return null;}")
+c("android.app.Application", "public interface ActivityLifecycleCallbacks{void onActivityCreated(Activity a,android.os.Bundle b);void onActivityStarted(Activity a);void onActivityResumed(Activity a);void onActivityPaused(Activity a);void onActivityStopped(Activity a);void onActivitySaveInstanceState(Activity a,android.os.Bundle b);void onActivityDestroyed(Activity a);} public void registerActivityLifecycleCallbacks(ActivityLifecycleCallbacks c){}", "class", "android.content.Context")
+c("android.app.Activity", "public Window getWindow(){return null;}", "class", "android.content.ContextWrapper")
+c("android.app.Dialog", "public Dialog(android.content.Context c,int t){} public void show(){} public void dismiss(){} public void setContentView(android.view.View v){} public boolean requestWindowFeature(int f){return true;} public android.view.Window getWindow(){return null;}")
+c("android.widget.Toast", "public static final int LENGTH_SHORT=0,LENGTH_LONG=1; public static Toast makeText(android.content.Context c,CharSequence t,int d){return null;} public void show(){}")
+c("android.graphics.Color", "public static final int WHITE=-1,TRANSPARENT=0; public static int parseColor(String s){return 0;} public static int HSVToColor(float[] h){return 0;}")
+c("android.graphics.Typeface", "public static final int BOLD=1;")
+c("android.graphics.drawable.Drawable", "", "abstract class")
+c("android.graphics.drawable.ColorDrawable", "public ColorDrawable(int c){}", "class", "Drawable")
+c("android.graphics.drawable.GradientDrawable", "public static final int OVAL=1; public void setColor(int c){} public void setCornerRadius(float r){} public void setShape(int s){} public void setStroke(int w,int c){}", "class", "Drawable")
+c("android.text.Spanned", "int SPAN_EXCLUSIVE_EXCLUSIVE=33;", "interface", "CharSequence")
+c("android.text.Editable", "", "interface", "CharSequence")
+c("android.text.TextWatcher", "void beforeTextChanged(CharSequence s,int a,int b,int c); void onTextChanged(CharSequence s,int a,int b,int c); void afterTextChanged(Editable e);", "interface")
+c("android.text.InputType", "public static final int TYPE_CLASS_TEXT=1,TYPE_CLASS_NUMBER=2,TYPE_TEXT_VARIATION_PASSWORD=128;")
+c("android.text.TextPaint", "public void setColor(int c){} public void setUnderlineText(boolean b){} public void setFakeBoldText(boolean b){}")
+c("android.text.SpannableStringBuilder", "public SpannableStringBuilder(CharSequence c){} public SpannableStringBuilder append(CharSequence c){return this;} public SpannableStringBuilder append(char c){return this;} public void setSpan(Object o,int s,int e,int f){} public int length(){return 0;} public int charAt_(){return 0;} public char charAt(int i){return 0;} public CharSequence subSequence(int a,int b){return null;}", "class", "implements CharSequence")
+c("android.text.method.LinkMovementMethod", "public static LinkMovementMethod getInstance(){return null;}", "class", "")
+c("android.text.method.MovementMethod", "", "interface")
+c("android.text.style.ClickableSpan", "public abstract void onClick(android.view.View v); public void updateDrawState(android.text.TextPaint t){}", "abstract class")
+c("android.text.style.ForegroundColorSpan", "public ForegroundColorSpan(int c){}")
+c("android.view.Gravity", "public static final int CENTER=17,CENTER_VERTICAL=16,CENTER_HORIZONTAL=1,BOTTOM=80;")
+c("android.view.Window", "public static final int FEATURE_NO_TITLE=1; public View getDecorView(){return null;} public void setBackgroundDrawable(android.graphics.drawable.Drawable d){} public void setLayout(int w,int h){} public void setSoftInputMode(int m){}", "abstract class")
+c("android.view.WindowManager", "public static class LayoutParams{public static final int SOFT_INPUT_ADJUST_RESIZE=16;}", "interface")
+c("android.view.ViewTreeObserver", "public interface OnGlobalLayoutListener{void onGlobalLayout();} public void addOnGlobalLayoutListener(OnGlobalLayoutListener l){}")
+c("android.view.View", "public interface OnClickListener{void onClick(View v);} public View(android.content.Context c){} public android.content.Context getContext(){return null;} public void setTag(int k,Object o){} public Object getTag(int k){return null;} public ViewTreeObserver getViewTreeObserver(){return null;} public void setOnClickListener(OnClickListener l){} public void setBackground(android.graphics.drawable.Drawable d){} public void setElevation(float e){} public void setPadding(int a,int b,int c,int d){} public void setVisibility(int v){} public void setLayoutParams(ViewGroup.LayoutParams p){} public static final int GONE=8,VISIBLE=0;")
+c("android.view.ViewGroup", "public static class LayoutParams{public static final int MATCH_PARENT=-1,WRAP_CONTENT=-2; public LayoutParams(int w,int h){}} public ViewGroup(android.content.Context c){super(c);} public int getChildCount(){return 0;} public View getChildAt(int i){return null;} public void addView(View v){} public void addView(View v,LayoutParams p){} public void addView(View v,int w,int h){} public void removeAllViews(){}", "abstract class", "View")
+c("android.widget.FrameLayout", "public static class LayoutParams extends ViewGroup.LayoutParams{public int gravity,bottomMargin; public LayoutParams(int w,int h){super(w,h);}} public FrameLayout(android.content.Context c){super(c);}", "class", "ViewGroup")
+c("android.widget.LinearLayout", "public static final int HORIZONTAL=0,VERTICAL=1; public static class LayoutParams extends ViewGroup.LayoutParams{public int topMargin,rightMargin; public LayoutParams(int w,int h){super(w,h);} public LayoutParams(int w,int h,float wt){super(w,h);}} public LinearLayout(android.content.Context c){super(c);} public void setOrientation(int o){} public void setGravity(int g){}", "class", "ViewGroup")
+c("android.widget.ScrollView", "public ScrollView(android.content.Context c){super(c);}", "class", "ViewGroup")
+c("android.widget.SeekBar", "public interface OnSeekBarChangeListener{void onProgressChanged(SeekBar s,int p,boolean u);void onStartTrackingTouch(SeekBar s);void onStopTrackingTouch(SeekBar s);} public SeekBar(android.content.Context c){super(c);} public void setMax(int m){} public void setOnSeekBarChangeListener(OnSeekBarChangeListener l){}", "class", "View")
+c("android.widget.TextView", "public TextView(android.content.Context c){super(c);} public void setText(CharSequence t){} public CharSequence getText(){return null;} public void setTextSize(float s){} public void setTextColor(int c){} public void setTypeface(android.graphics.Typeface t,int s){} public void setGravity(int g){} public void setHint(CharSequence h){} public void setHintTextColor(int c){} public void setSingleLine(boolean b){} public void setInputType(int t){} public void setMovementMethod(android.text.method.LinkMovementMethod m){} public void addTextChangedListener(android.text.TextWatcher w){}", "class", "View")
+c("android.widget.EditText", "public EditText(android.content.Context c){super(c);} public android.text.Editable getText(){return null;}", "class", "TextView")
+c("android.telephony.TelephonyManager", "public static final int SIM_STATE_READY=5;")
+c("android.telephony.SubscriptionInfo", "")
+c("android.R", "public static class style{public static final int Theme_DeviceDefault_Dialog_NoActionBar=1;}")
+
+out = Path(sys.argv[1])
+for fq, (kind, ext, body) in S.items():
+    pkg, name = fq.rsplit(".", 1)
+    d = out / pkg.replace(".", "/")
+    d.mkdir(parents=True, exist_ok=True)
+    ex = (" " + ext if ext.startswith("implements") else f" extends {ext}") if ext else ""
+    kind_w = kind if kind != "class" else "class"
+    imports = "import android.view.*; import android.content.*; import android.app.*; import android.os.*; import android.graphics.drawable.*; import android.text.*;"
+    cons = ""
+    (d / f"{name}.java").write_text(f"package {pkg};\n{imports}\npublic {kind_w} {name}{ex} {{\n{body}\n}}\n")

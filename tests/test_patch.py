@@ -36,8 +36,8 @@ check("Hooks;->Locale_getCountry(Ljava/util/Locale;)Ljava/lang/String;" in new, 
 check("Hooks;->ClipboardManager_setPrimaryClip(Landroid/content/ClipboardManager;Landroid/content/ClipData;)V" in new, "setPrimaryClip")
 check("String;->length()I" in new and "getDeviceId" in new, "unrelated calls untouched")
 
-# every table entry must have a matching Java method in Hooks.java.in
-java = (ROOT / "hooks" / "Hooks.java.in").read_text()
+# every table entry must have a matching Java method in Hooks.java
+java = (ROOT / "hooks" / "Hooks.java").read_text()
 for owner, method, args, ret in P.TABLE:
     simple = P.hook_name(owner, method)
     argc = 1 + (0 if not args else 1)

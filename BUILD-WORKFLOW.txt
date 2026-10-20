@@ -6,11 +6,15 @@ on:
         description: "Direct link to the official TikTok .apk (see INSTRUCTION-RU.md, step 2)"
         required: true
       region:
-        description: "Country the phone should pretend to be in"
+        description: "Country at the first start (can be changed later in the mod menu inside TikTok, any country)"
         required: true
         type: choice
         default: NL
-        options: [NL, DE, KZ, TR, PL, GB, US, FR, AE]
+        options: [NL, RU, DE, BY, KZ, US, TR, PL, GB, FR, AE]
+      server_url:
+        description: "Address of your Cloudflare server for notes and updates (INSTRUCTION-RU.md, part 3). Can stay empty."
+        required: false
+        default: ""
       change_system_region:
         description: "Also change the country part of the system locale (language stays)"
         required: true
@@ -37,9 +41,14 @@ jobs:
       - name: Tests
         run: |
           python3 -I tests/test_patch.py
-          mkdir -p out && javac -d out hooks/Region.java hooks/LinkCleaner.java tests/*.java
+          python3 -I tests/test_dex_api.py
+          mkdir -p out && javac -nowarn -d out hooks/Region.java hooks/Json.java hooks/LinkCleaner.java tests/*.java
           java -cp out dev.clean.RegionTest
           java -cp out dev.clean.LinkCleanerTest
+          (cd server && node worker.test.mjs)
+          python3 -I tests/make_stubs.py stubsrc && mkdir -p stubout && javac -nowarn -d stubout $(find stubsrc -name '*.java')
+          sed 's/__REGION__/NL/;s/__LOCALE__/true/;s/__BUILD__/1/;s|__SERVER__|https://x.dev|' hooks/Config.java.in > hooks/Config.java.tmp && mkdir -p chk && cp hooks/Config.java.tmp chk/Config.java && rm hooks/Config.java.tmp
+          javac -nowarn -cp stubout -d chk2 chk/Config.java hooks/*.java
 
       - name: Download TikTok
         env: { APK_URL: "${{ inputs.apk_url }}" }
@@ -53,7 +62,10 @@ jobs:
         run: curl -L --fail -o apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar
 
       - name: Unpack (code only; resources stay exactly as they are)
-        run: java -Xmx5g -jar apktool.jar d -r -f -o dec tiktok.apk
+        run: |
+          java -Xmx5g -jar apktool.jar d -r -f -o dec tiktok.apk
+          # apktool picks too low a "api level" for the code after -r; this raises it to what the dex files need
+          python3 -I dex_api.py tiktok.apk dec
 
       - name: Report (what is inside the original TikTok)
         run: |
@@ -69,12 +81,21 @@ jobs:
         env:
           REGION: ${{ inputs.region }}
           LOCALE: ${{ inputs.change_system_region }}
+          SERVER: ${{ inputs.server_url }}
+          BUILD: ${{ github.run_number }}
         run: |
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           PLAT=$(ls -d "$ANDROID_HOME"/platforms/android-* | sort -V | tail -1)
           mkdir -p build/src build/classes build/dex
-          sed "s/__REGION__/${REGION}/; s/__LOCALE__/${LOCALE}/" hooks/Hooks.java.in > build/src/Hooks.java
-          cp hooks/Region.java hooks/LinkCleaner.java build/src/
+          python3 -I - <<'PY'
+          import os
+          t = open("hooks/Config.java.in").read()
+          for k in ("REGION", "LOCALE", "BUILD", "SERVER"):
+              t = t.replace("__%s__" % k, os.environ.get(k, "").strip())
+          open("build/src/Config.java", "w").write(t)
+          PY
+          cp hooks/*.java build/src/
+          # compile-check against the real Android library; fails the build here (not on your phone) if something is wrong
           javac --release 8 -cp "$PLAT/android.jar" -d build/classes build/src/*.java
           "$BT/d8" --release --min-api 21 --lib "$PLAT/android.jar" --output build/dex $(find build/classes -name '*.class')
           ls -la build/dex

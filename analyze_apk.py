@@ -67,6 +67,17 @@ def main(root: Path) -> str:
     for k, n in top.most_common(40):
         out.append(f"  {k:40s} {n}")
 
+    out.append("\n== SCREEN CLASSES WITH 'Setting' IN THE NAME (for the mod-menu button) ==")
+    names = set()
+    for d in smali:
+        for f in d.rglob("*.smali"):
+            if "setting" in f.name.lower() and f.name.lower().endswith("activity.smali"):
+                names.add(f.relative_to(d).as_posix())
+    for n in sorted(names)[:80]:
+        out.append("  " + n)
+    if not names:
+        out.append("  (none)")
+
     out.append(f"\n== HOSTS FOUND IN THE CODE ({len(hosts)} different; top 150) ==")
     for h, n in hosts.most_common(150):
         out.append(f"  {h}  x{n}")
