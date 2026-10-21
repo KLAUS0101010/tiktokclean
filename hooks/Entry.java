@@ -21,6 +21,7 @@ final class Entry {
 
     private static final int TAG_DECOR = 0x7fc1ea01;
     private static final int TAG_BAR = 0x7fc1ea02;
+    private static final int TAG_CHIP = 0x7fc1ea03;
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     static volatile Activity current;
@@ -89,6 +90,49 @@ final class Entry {
             @Override public void onClick(View v) { Menu.open(a); }
         });
         ((FrameLayout) decor).addView(t, lp);
+    }
+
+    /** After "copy link": a button at the bottom that opens the download screen for that video. */
+    static void showChip(final String link) {
+        MAIN.post(new Runnable() {
+            @Override public void run() {
+                final Activity a = current;
+                if (a == null) return;
+                try {
+                    final View decor = a.getWindow().getDecorView();
+                    if (!(decor instanceof FrameLayout)) return;
+                    removeChip(decor);
+                    float d = a.getResources().getDisplayMetrics().density;
+                    final TextView t = new TextView(a);
+                    t.setText("⬇  Скачать это видео без водяного знака");
+                    t.setTextColor(Color.WHITE);
+                    t.setTextSize(15);
+                    t.setTypeface(null, android.graphics.Typeface.BOLD);
+                    t.setPadding((int) (20 * d), (int) (13 * d), (int) (20 * d), (int) (13 * d));
+                    GradientDrawable bg = new GradientDrawable();
+                    bg.setColor(0xF2202026);
+                    bg.setCornerRadius(40 * d);
+                    bg.setStroke((int) (2 * d), 0xFFFE2C55);
+                    t.setBackground(bg);
+                    t.setElevation(14 * d);
+                    FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+                    lp.bottomMargin = (int) (150 * d);
+                    t.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) { removeChip(decor); Menu.openDownload(a, link); }
+                    });
+                    ((FrameLayout) decor).addView(t, lp);
+                    decor.setTag(TAG_CHIP, t);
+                    MAIN.postDelayed(new Runnable() { @Override public void run() { removeChip(decor); } }, 12000);
+                } catch (Throwable ignored) { }
+            }
+        });
+    }
+
+    private static void removeChip(View decor) {
+        Object o = decor.getTag(TAG_CHIP);
+        if (o instanceof View && decor instanceof FrameLayout) ((FrameLayout) decor).removeView((View) o);
+        decor.setTag(TAG_CHIP, null);
     }
 
     /** Re-draws the notes whenever the screen changes. */

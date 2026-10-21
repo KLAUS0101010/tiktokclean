@@ -10,6 +10,7 @@ import android.text.TextPaint;
 import android.text.method.LinkMovementMethod;
 import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
+import android.text.style.RelativeSizeSpan;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
@@ -101,21 +102,65 @@ final class Badges {
         if (cs == null) return;
         int n = cs.length();
         if (n < 3 || n > 40 || cs.charAt(0) != '@') return;
-        if (cs.charAt(n - 1) == NOTE.charAt(0)) return;            // already has our note
+        if (cs.charAt(n - 1) == NOTE.charAt(0)) return;            // fallback note already on the @username
         final String user = cs.toString().substring(1).trim().toLowerCase();
         final Badge b = map.get(user);
         if (b == null) return;
-        SpannableStringBuilder ssb = new SpannableStringBuilder(cs);
+        TextView name = findNameView(t);
+        if (name != null) {
+            CharSequence nc = name.getText();
+            if (nc.length() > 0 && nc.charAt(nc.length() - 1) == NOTE.charAt(0)) return;   // already there
+            attach(name, nc, b, user, 2.4f);
+        } else {
+            attach(t, cs, b, user, 1.8f);                          // no name found: put it after the @username
+        }
+    }
+
+    /** The display name sits right above the @username and is written in bigger letters. */
+    private static TextView findNameView(TextView u) {
+        float d = u.getResources().getDisplayMetrics().density;
+        int[] ul = new int[2];
+        u.getLocationOnScreen(ul);
+        View root = u;
+        for (int i = 0; i < 4 && root.getParent() instanceof View; i++) root = (View) root.getParent();
+        TextView[] best = new TextView[1];
+        float[] bestDist = {Float.MAX_VALUE};
+        scanName(root, u, ul, d, best, bestDist);
+        return best[0];
+    }
+
+    private static void scanName(View v, TextView u, int[] ul, float d, TextView[] best, float[] bestDist) {
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) scanName(g.getChildAt(i), u, ul, d, best, bestDist);
+            return;
+        }
+        if (v == u || !(v instanceof TextView) || v instanceof EditText || !v.isShown()) return;
+        TextView c = (TextView) v;
+        CharSequence s = c.getText();
+        if (s == null || s.length() == 0 || s.length() > 40 || s.charAt(0) == '@') return;
+        if (c.getTextSize() < u.getTextSize() * 1.15f) return;
+        int[] cl = new int[2];
+        c.getLocationOnScreen(cl);
+        float below = ul[1] - (cl[1] + c.getHeight());               // gap between the name and the @username
+        if (below < -8 * d || below > 120 * d) return;
+        if (Math.abs(cl[0] - ul[0]) > 48 * d) return;
+        if (below < bestDist[0]) { bestDist[0] = below; best[0] = c; }
+    }
+
+    private static void attach(TextView host, CharSequence text, final Badge b, final String user, float scale) {
+        SpannableStringBuilder ssb = new SpannableStringBuilder(text);
         ssb.append(' ');
         int st = ssb.length();
         ssb.append(NOTE);
         ssb.setSpan(new ForegroundColorSpan(b.color), st, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        ssb.setSpan(new RelativeSizeSpan(scale), st, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         ssb.setSpan(new ClickableSpan() {
             @Override public void onClick(View w) { Menu.showBadge(activityOf(w), user, b); }
             @Override public void updateDrawState(TextPaint ds) { ds.setColor(b.color); ds.setUnderlineText(false); ds.setFakeBoldText(true); }
         }, st, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        t.setText(ssb);
-        t.setMovementMethod(LinkMovementMethod.getInstance());
+        host.setText(ssb);
+        host.setMovementMethod(LinkMovementMethod.getInstance());
     }
 
     static Activity activityOf(View v) {

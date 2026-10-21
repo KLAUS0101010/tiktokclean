@@ -94,6 +94,18 @@ final class Menu {
         }
     }
 
+    /** Opens the menu straight on the download screen for this video link. */
+    static void openDownload(Activity a, String link) {
+        if (a == null) return;
+        try {
+            Menu m = new Menu(a);
+            m.dialog.show();
+            m.downloadScreen(link);
+        } catch (Throwable t) {
+            try { Toast.makeText(a, "Меню мода: " + t, Toast.LENGTH_LONG).show(); } catch (Throwable ignored) { }
+        }
+    }
+
     /** Tap on a note next to a name: tells why it was given. */
     static void showBadge(Activity a, String user, Badges.Badge b) {
         if (a == null) return;
@@ -121,6 +133,7 @@ final class Menu {
     private void main() {
         screen("Меню мода", null);
         body.addView(item("🌍  Регион подмены", Store.region().label(), new Runnable() { @Override public void run() { regions(""); } }));
+        body.addView(item("⬇  Скачать видео", "без водяного знака, любое качество, с размером", new Runnable() { @Override public void run() { downloadScreen(""); } }));
         body.addView(item("♪  Получить ноту", "значок рядом с именем", new Runnable() { @Override public void run() { getNote(); } }));
         Badges.Update u = Badges.update;
         boolean newer = u != null && u.build > Config.BUILD;
@@ -173,6 +186,96 @@ final class Menu {
             });
             list.addView(t, lp);
         }
+    }
+
+    // -- download
+    private void downloadScreen(String url) {
+        screen("Скачать видео", toMain());
+        body.addView(paragraph("Нажми в TikTok «Поделиться → Копировать ссылку»: внизу появится кнопка «Скачать». Или вставь ссылку сюда. Водяного знака не будет, видео с запретом на скачивание тоже скачиваются.", DIM));
+        final EditText link = edit("Ссылка на видео", url == null ? "" : url);
+        body.addView(link);
+        body.addView(button("Вставить из буфера", CARD, new Runnable() {
+            @Override public void run() {
+                try {
+                    android.content.ClipboardManager cm = (android.content.ClipboardManager) act.getSystemService("clipboard");
+                    android.content.ClipData c = cm.getPrimaryClip();
+                    CharSequence s = c == null || c.getItemCount() == 0 ? null : c.getItemAt(0).getText();
+                    String l = VideoInfo.findLink(s == null ? null : s.toString());
+                    if (l != null) link.setText(l); else Toast.makeText(act, "В буфере нет ссылки на TikTok", Toast.LENGTH_SHORT).show();
+                } catch (Throwable t) { Toast.makeText(act, "Не удалось прочитать буфер", Toast.LENGTH_SHORT).show(); }
+            }
+        }));
+        body.addView(button("Найти видео", ACCENT, new Runnable() {
+            @Override public void run() {
+                String l = VideoInfo.findLink(link.getText().toString());
+                if (l == null) { Toast.makeText(act, "Нужна ссылка на видео TikTok", Toast.LENGTH_SHORT).show(); return; }
+                loadVideo(l);
+            }
+        }));
+        if (url != null && !url.isEmpty()) loadVideo(url);
+    }
+
+    private void loadVideo(String link) {
+        screen("Скачать видео", new Runnable() { @Override public void run() { downloadScreen(""); } });
+        body.addView(paragraph("Загружаю информацию о видео…", DIM));
+        Download.fetch(link, new Download.Info() {
+            @Override public void done(VideoInfo info) { showQualities(info); }
+        });
+    }
+
+    private String qualityText(VideoInfo.Quality q) {
+        return q.label + "\n" + VideoInfo.sizeText(q.bytes, q.exact);
+    }
+
+    private void showQualities(final VideoInfo info) {
+        screen("Скачать видео", new Runnable() { @Override public void run() { downloadScreen(""); } });
+        if (info.error != null) {
+            body.addView(paragraph(info.error, 0xFFFF6B6B));
+            body.addView(paragraph("Что можно сделать: проверь ссылку, попробуй позже или включи VPN, если TikTok не открывает страницу.", DIM));
+            return;
+        }
+        if (!info.images.isEmpty()) {
+            body.addView(paragraph("Это фото-пост: " + info.images.size() + " фото. Сохраняются только картинки, без звука.", TEXT));
+            final TextView st = paragraph("", DIM);
+            body.addView(button("Сохранить все фото (" + info.images.size() + ")", ACCENT, new Runnable() {
+                @Override public void run() {
+                    st.setText("Начинаю…");
+                    Download.saveImages(act, info.images, info.id, new Download.Progress() {
+                        @Override public void text(String s) { st.setText(s); }
+                        @Override public void finished(boolean ok, String message) { st.setText(message); }
+                    });
+                }
+            }));
+            body.addView(st);
+            return;
+        }
+        body.addView(paragraph("Выбери качество. Размер со знаком «~» примерный, без него точный (точный уточняется в течение секунды).", DIM));
+        final TextView status = paragraph("", DIM);
+        for (final VideoInfo.Quality q : info.qualities) {
+            final TextView row = text(qualityText(q), 16, TEXT);
+            row.setPadding(dp(14), dp(13), dp(14), dp(13));
+            row.setBackground(round(CARD, 10));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dp(8);
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    status.setText("Начинаю скачивание…");
+                    Download.save(act, q, info.id, new Download.Progress() {
+                        @Override public void text(String s) { status.setText(s); }
+                        @Override public void finished(boolean ok, String message) { status.setText(message); }
+                    });
+                }
+            });
+            body.addView(row, lp);
+            if (!q.exact) {
+                Download.exactSize(q.url, new Download.Size() {
+                    @Override public void done(long bytes) {
+                        if (bytes > 0) { q.bytes = bytes; q.exact = true; row.setText(qualityText(q)); }
+                    }
+                });
+            }
+        }
+        body.addView(status);
     }
 
     // -- note

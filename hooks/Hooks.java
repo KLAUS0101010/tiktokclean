@@ -70,6 +70,7 @@ public final class Hooks {
         ClipData out = clip;
         try { out = cleanClip(clip); } catch (Throwable ignored) { }
         cm.setPrimaryClip(out);
+        try { Download.offer(out); } catch (Throwable ignored) { }
     }
 
     static ClipData cleanClip(ClipData clip) {

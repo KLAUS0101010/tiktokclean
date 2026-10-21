@@ -64,5 +64,54 @@ with tempfile.TemporaryDirectory() as d:
     r = Path(d); (r / "smali").mkdir(); (r / "smali/A.smali").write_text(".class LA;\n")
     check(P.main(["p", str(r)]) == 1, "not TikTok -> refuses")
 
+# ---- ad filter in the feed ----------------------------------------------------------------
+FEED = """.class public Lcom/ss/android/ugc/aweme/feed/model/FeedItemList;
+.field public items:Ljava/util/List;
+.method public <init>()V
+    .locals 1
+    return-void
+.end method
+.method public getItems()Ljava/util/List;
+    .locals 2
+    iget-object v0, p0, Lcom/ss/android/ugc/aweme/feed/model/FeedItemList;->items:Ljava/util/List;
+    return-object v0
+.end method
+.method public getCount()I
+    .locals 1
+    const/4 v0, 0x1
+    return v0
+.end method
+"""
+USER = """.class public Lcom/x/Feed;
+.method public static f(Lcom/ss/android/ugc/aweme/feed/model/FeedItemList;)V
+    .locals 3
+    iget-object v1, p0, Lcom/ss/android/ugc/aweme/feed/model/FeedItemList;->items:Ljava/util/List;
+    iget-object v20, p0, Lcom/ss/android/ugc/aweme/feed/model/FeedItemList;->items:Ljava/util/List;
+    iget-object v1, p0, Lcom/other/Thing;->items:Ljava/util/List;
+    return-void
+.end method
+"""
+nf, n1 = P.patch_feed_methods(FEED)
+nf, n2 = P.patch_feed_reads(nf)
+check(n1 == 1 and n2 == 1, f"feed class: 1 method return + 1 field read patched (got {n1},{n2})")
+check(nf.count("AdFilter;->filter") == 2, "two filter calls in FeedItemList")
+check("return v0" in nf and "return-void" in nf, "other returns untouched")
+check("move-result-object v0\n    return-object v0" in nf, "result put back in same register before return")
+nu, n3 = P.patch_feed_reads(USER)
+check(n3 == 1 and nu.count("AdFilter") == 1, "only the low-register FeedItemList read patched; other classes and v20 untouched")
+check(P.patch_feed_methods(USER)[1] == 0, "other classes' methods untouched")
+with tempfile.TemporaryDirectory() as d:
+    r = Path(d); (r / "smali/com/x").mkdir(parents=True)
+    (r / "smali/com/x/Y.smali").write_text(SMALI)
+    (r / "smali/com/x/Feed.smali").write_text(USER)
+    (r / "smali/F.smali").write_text(FEED)
+    check(P.main(["p", str(r)]) == 0, "run with ads on")
+    check("AdFilter" in (r / "smali/F.smali").read_text() and "AdFilter" in (r / "smali/com/x/Feed.smali").read_text(), "filter inserted by main")
+with tempfile.TemporaryDirectory() as d:
+    r = Path(d); (r / "smali/com/x").mkdir(parents=True)
+    (r / "smali/com/x/Y.smali").write_text(SMALI); (r / "smali/F.smali").write_text(FEED)
+    check(P.main(["p", str(r), "--no-ads"]) == 0 and "AdFilter" not in (r / "smali/F.smali").read_text(), "--no-ads leaves the feed alone")
+check(P.main(["p"]) == 2 and P.main(["p", "x", "--bogus"]) == 2, "bad arguments refused")
+
 print("ALL PASSED" if not fails else f"{fails} FAILED")
 sys.exit(1 if fails else 0)

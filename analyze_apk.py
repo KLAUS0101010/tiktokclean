@@ -78,6 +78,39 @@ def main(root: Path) -> str:
     if not names:
         out.append("  (none)")
 
+    out.append("\n== AD FILTER: feed list classes and classes with an isAd() method ==")
+    feed, isad = [], []
+    for d in smali:
+        for f in d.rglob("*.smali"):
+            rel = f.relative_to(d).as_posix()
+            if f.name == "FeedItemList.smali":
+                feed.append(rel)
+            try:
+                if ".method" in (txt := f.read_text(encoding="utf-8", errors="replace")) and re.search(r"\.method [^\n]*\bisAd\(\)Z", txt):
+                    isad.append(rel)
+            except Exception:
+                pass
+    out.append("  FeedItemList: " + (", ".join(feed) if feed else "NOT FOUND (ad filter will not work in this version)"))
+    for n in sorted(isad)[:40]:
+        out.append("  isAd(): " + n)
+
+    out.append("\n== FEATURE CANDIDATES: strings with banner / repost (to find the switches of new features) ==")
+    cand = Counter()
+    words = re.compile(r'const-string [vp]\d+, "([^"]*(?:banner|repost|re_post|profile_header)[^"]*)"', re.I)
+    for d in smali:
+        for f in d.rglob("*.smali"):
+            try:
+                txt = f.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            for s in words.findall(txt):
+                if len(s) < 80:
+                    cand[(s, f.relative_to(d).as_posix())] += 1
+    for (s, fn), n in sorted(cand.items())[:150]:
+        out.append(f"  {s}   <- {fn}")
+    if not cand:
+        out.append("  (none)")
+
     out.append(f"\n== HOSTS FOUND IN THE CODE ({len(hosts)} different; top 150) ==")
     for h, n in hosts.most_common(150):
         out.append(f"  {h}  x{n}")
