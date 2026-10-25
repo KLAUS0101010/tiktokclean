@@ -94,9 +94,21 @@ def main(root: Path) -> str:
     for n in sorted(isad)[:40]:
         out.append("  isAd(): " + n)
 
-    out.append("\n== FEATURE CANDIDATES: strings with banner / repost (to find the switches of new features) ==")
+    out.append("\n== CLASS NAMES for new features (profile banner, comment repost) ==")
+    names = []
+    pat = re.compile(r"(ProfileBanner|ProfileCover|ProfileHeader.*Banner|BannerEdit|EditBanner|CommentRepost|RepostComment|CommentShare|Repost)", re.I)
+    for d in smali:
+        for f in d.rglob("*.smali"):
+            if pat.search(f.name):
+                names.append(f.relative_to(d).as_posix())
+    for n in sorted(names)[:200]:
+        out.append("  " + n)
+    if not names:
+        out.append("  (none)")
+
+    out.append("\n== FEATURE KEYS: strings that look like settings/experiment names for these features ==")
     cand = Counter()
-    words = re.compile(r'const-string [vp]\d+, "([^"]*(?:banner|repost|re_post|profile_header)[^"]*)"', re.I)
+    words = re.compile(r'const-string [vp]\d+, "([A-Za-z0-9_.\-]*(?:profile_bg|profile_?banner|profile_?cover|comment_?repost|repost_?comment|banner_?enable|enable_?repost|repost_?enable|enable_self_repost)[A-Za-z0-9_.\-]*)"', re.I)
     for d in smali:
         for f in d.rglob("*.smali"):
             try:
@@ -104,9 +116,8 @@ def main(root: Path) -> str:
             except Exception:
                 continue
             for s in words.findall(txt):
-                if len(s) < 80:
-                    cand[(s, f.relative_to(d).as_posix())] += 1
-    for (s, fn), n in sorted(cand.items())[:150]:
+                cand[(s, f.relative_to(d).as_posix())] += 1
+    for (s, fn), n in sorted(cand.items())[:200]:
         out.append(f"  {s}   <- {fn}")
     if not cand:
         out.append("  (none)")

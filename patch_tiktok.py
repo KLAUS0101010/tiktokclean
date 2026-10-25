@@ -8,6 +8,7 @@ What it does to the *official* TikTok app:
   2. Copying a link puts a cleaned link on the clipboard (tracking parameters removed).
   3. Third-party analytics host names inside the code are replaced by 0.0.0.0.
   4. The Google advertising-id function returns the "no id" value.
+  6. Switches for the profile banner and comment repost are forced on (menu can turn off).
   5. Advertising videos are taken out of the feed list (disable with --no-ads).
 It cannot hide you from TikTok's own servers (your IP, your account's registration country).
 """
@@ -132,6 +133,89 @@ def patch_feed_methods(text):
     return _METHOD.sub(body, text), n
 
 
+# ---- experiment flags: profile banner, comment repost ---------------------------------------
+# TikTok reads a named server setting with a call like  reader("profile_bg_in_allow_list", default)  that
+# returns the answer. Names of the reader class and method change with every TikTok release, so we do not
+# look for them: we look for the flag's *name* (a string), find the call that is given that string, and
+# put our adjust() after it. Only flags listed in hooks/Flags.java are touched.
+FLAG_KEYS = ["profile_bg_in_allow_list", "profile_bg_enable_consumption_group",
+             "tt_comment_repost", "tt_comment_repost_interaction", "tt_audio_comment_repost", "enable_self_repost"]
+FLAGS_CLASS = "Ldev/clean/Flags;"
+
+_METHOD_ANY = re.compile(r"(\.method [^\n]*\n)(.*?)(\.end method)", re.S)
+_LOCALS = re.compile(r"^([ \t]*)\.locals (\d+)[ \t]*$", re.M)
+_CONST = re.compile(r"^[ \t]*const-string (v\d+), \"([^\"]+)\"[ \t]*$")
+_INVOKE = re.compile(r"^[ \t]*invoke-static \{(v\d+)(?:, (v\d+))?\}, L[^;]+;->[^(\s]+\(Ljava/lang/String;([ZI])\)([ZI])[ \t]*$")
+_MOVE = re.compile(r"^([ \t]*)move-result (v\d+)[ \t]*$")
+
+
+def patch_flags(text):
+    """Returns (new text, {key: number of places}). Methods are changed one by one."""
+    found = {}
+    if not any(k in text for k in FLAG_KEYS):
+        return text, found
+
+    def per_method(m):
+        head, body, end = m.groups()
+        if not any(k in body for k in FLAG_KEYS):
+            return m.group(0)
+        lm = _LOCALS.search(body)
+        if not lm:
+            return m.group(0)
+        spare = int(lm.group(2))                 # the register we add: v<locals>
+        if spare > 15:
+            return m.group(0)
+        lines = body.split("\n")
+        out, i, changed = [], 0, False
+        keyreg = {}                               # register -> flag name, while it still holds it
+        while i < len(lines):
+            line = lines[i]
+            out.append(line)
+            cm = _CONST.match(line)
+            if cm:
+                if cm.group(2) in FLAG_KEYS:
+                    keyreg[cm.group(1)] = cm.group(2)
+                else:
+                    keyreg.pop(cm.group(1), None)
+            else:
+                im = _INVOKE.match(line)
+                if im and im.group(1) in keyreg and im.group(3) == im.group(4) and i + 1 < len(lines):
+                    mv = _MOVE.match(lines[i + 1])
+                    reg = mv.group(2) if mv else None
+                    if mv and int(reg[1:]) <= 15 and reg != f"v{spare}" and im.group(2) is not None:
+                        key, t = keyreg[im.group(1)], im.group(3)
+                        out.append(lines[i + 1])
+                        ind = mv.group(1)
+                        out.append(f'{ind}const-string v{spare}, "{key}"')
+                        out.append(f"{ind}invoke-static {{v{spare}, {reg}}}, {FLAGS_CLASS}->adjust(Ljava/lang/String;{t}){t}")
+                        out.append(f"{ind}move-result {reg}")
+                        found[key] = found.get(key, 0) + 1
+                        changed = True
+                        i += 1
+            i += 1
+        if not changed:
+            return m.group(0)
+        new_body = "\n".join(out)
+        new_body = _LOCALS.sub(lambda l: f"{l.group(1)}.locals {int(l.group(2)) + 1}", new_body, count=1)
+        return head + new_body + end
+
+    return _METHOD_ANY.sub(per_method, text), found
+
+
+# ---- Google sign-in ---------------------------------------------------------------------------
+# Signing the app with our own key changes its certificate, and Google's sign-in through Play Services checks
+# package name + certificate, so the button ends in "developer error". TikTok has a second way in that it uses
+# when Play Services is missing: Google sign-in in the browser, which does not check the certificate. The app
+# chooses between the two by asking the class below whether Play Services is available. We answer "no".
+GOOGLE_AUTH_FILE = "com/bytedance/lobby/google/GoogleAuth.smali"
+_IS_AVAILABLE = re.compile(r"(\.method [^\n]*\bisAvailable\(\)Z\n)(.*?)(\.end method)", re.S)
+
+
+def patch_google_login(text):
+    return _IS_AVAILABLE.subn(
+        lambda m: m.group(1) + "    .locals 1\n    const/4 v0, 0x0\n    return v0\n" + m.group(3), text)
+
+
 def smali_files(root: Path):
     return [p for d in root.glob("smali*") if d.is_dir() for p in d.rglob("*.smali")]
 
@@ -164,6 +248,8 @@ def main(argv):
         return 2
 
     calls = hosts = ads = files = feed = 0
+    flags = {}
+    google = 0
     per = {}
     for f in smali_files(root):
         text = f.read_text(encoding="utf-8", errors="surrogateescape")
@@ -177,6 +263,12 @@ def main(argv):
             new, a1 = patch_feed_reads(new)
             new, a2 = patch_feed_methods(new)
             feed += a1 + a2
+        if f.as_posix().endswith(GOOGLE_AUTH_FILE):
+            new, g = patch_google_login(new)
+            google += g
+        new, fl = patch_flags(new)
+        for k, v in fl.items():
+            flags[k] = flags.get(k, 0) + v
         if f.as_posix().endswith("ads/identifier/AdvertisingIdClient.smali"):
             new, a = patch_ad_id(new)
             ads += a
@@ -192,6 +284,16 @@ def main(argv):
         if feed == 0:
             print("    WARNING: FeedItemList was not found or has an unexpected shape in this TikTok version,"
                   " so ads are NOT removed. Send me report.txt and I will adapt the patch.")
+    print(f"[5] feature switches (banner, comment repost) hooked: {sum(flags.values())} place(s)")
+    for k in FLAG_KEYS:
+        print(f"      {k}: {flags.get(k, 0)}")
+    if not flags:
+        print("    WARNING: none of the feature switches was found in this TikTok version, banner/repost cannot be switched on."
+              " Send me report.txt.")
+    print(f"[6] Google sign-in switched to the browser way (works with a re-signed app): {google}")
+    if not google:
+        print("    WARNING: GoogleAuth.isAvailable() was not found in this TikTok version, Google sign-in may fail with a developer error."
+              " Use phone/email sign-in or send me report.txt.")
     print(f"    files changed: {files}")
     if calls == 0:
         print("error: found no SIM/region calls. This does not look like TikTok. Nothing is safe to ship.")
