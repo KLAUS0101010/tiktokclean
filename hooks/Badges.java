@@ -4,13 +4,12 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.graphics.Color;
+import android.text.Layout;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
-import android.text.TextPaint;
-import android.text.method.LinkMovementMethod;
-import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.RelativeSizeSpan;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
@@ -97,23 +96,36 @@ final class Badges {
         }
     }
 
+    private static final int TAG_MISS = 0x7fc1ea04;
+    private static final int TAG_NOTE = 0x7fc1ea05;
+
     private static void decorateText(final TextView t) {
         CharSequence cs = t.getText();
         if (cs == null) return;
         int n = cs.length();
         if (n < 3 || n > 40 || cs.charAt(0) != '@') return;
-        if (cs.charAt(n - 1) == NOTE.charAt(0)) return;            // fallback note already on the @username
-        final String user = cs.toString().substring(1).trim().toLowerCase();
+        boolean hasFallback = cs.charAt(n - 1) == NOTE.charAt(0);
+        String raw = hasFallback ? cs.subSequence(0, n - 2).toString() : cs.toString();
+        final String user = raw.substring(1).trim().toLowerCase();
         final Badge b = map.get(user);
         if (b == null) return;
         TextView name = findNameView(t);
         if (name != null) {
+            t.setTag(TAG_MISS, null);
+            if (hasFallback) t.setText(raw);                         // the name is there now: take the note off the @username
             CharSequence nc = name.getText();
             if (nc.length() > 0 && nc.charAt(nc.length() - 1) == NOTE.charAt(0)) return;   // already there
-            attach(name, nc, b, user, 2.4f);
-        } else {
-            attach(t, cs, b, user, 1.8f);                          // no name found: put it after the @username
+            attach(name, nc, b, user, 1.0f);
+            return;
         }
+        if (hasFallback) return;
+        // No bigger name above the @username. On a profile the name may simply not be drawn yet, so wait a moment
+        // before deciding that this is a place without a name (the feed, comments) and using the @username.
+        Object first = t.getTag(TAG_MISS);
+        long now = System.currentTimeMillis();
+        if (first == null) { t.setTag(TAG_MISS, Long.valueOf(now)); Entry.recheckSoon(); return; }
+        if (now - ((Long) first).longValue() < 700) { Entry.recheckSoon(); return; }
+        attach(t, cs, b, user, 1.15f);
     }
 
     /** The display name sits right above the @username and is written in bigger letters. */
@@ -154,14 +166,46 @@ final class Badges {
         int st = ssb.length();
         ssb.append(NOTE);
         ssb.setSpan(new ForegroundColorSpan(b.color), st, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        ssb.setSpan(new RelativeSizeSpan(scale), st, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        ssb.setSpan(new ClickableSpan() {
-            @Override public void onClick(View w) { Menu.showBadge(activityOf(w), user, b); }
-            @Override public void updateDrawState(TextPaint ds) { ds.setColor(b.color); ds.setUnderlineText(false); ds.setFakeBoldText(true); }
-        }, st, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        if (scale != 1.0f) ssb.setSpan(new RelativeSizeSpan(scale), st, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         host.setText(ssb);
-        host.setMovementMethod(LinkMovementMethod.getInstance());
+        host.setTag(TAG_NOTE, new Object[]{user, b});
+        host.setOnTouchListener(TOUCH);
     }
+
+    /**
+     * Tap on the note. A click span would let the app's own click (copy the name) fire too, so the touch
+     * is handled here: a touch on the note is ours completely, a touch anywhere else goes on as before.
+     */
+    private static final View.OnTouchListener TOUCH = new View.OnTouchListener() {
+        @Override public boolean onTouch(View v, MotionEvent e) {
+            try {
+                if (!(v instanceof TextView)) return false;
+                TextView tv = (TextView) v;
+                Object tag = tv.getTag(TAG_NOTE);
+                CharSequence tx = tv.getText();
+                int n = tx.length();
+                Layout l = tv.getLayout();
+                if (!(tag instanceof Object[]) || l == null || n < 2 || tx.charAt(n - 1) != NOTE.charAt(0)) return false;
+                float d = tv.getResources().getDisplayMetrics().density;
+                float x = e.getX() - tv.getTotalPaddingLeft() + tv.getScrollX();
+                float y = e.getY() - tv.getTotalPaddingTop() + tv.getScrollY();
+                int line = l.getLineForOffset(n - 1);
+                if (l.getLineForVertical((int) y) != line) return false;
+                float xs = l.getPrimaryHorizontal(n - 1), xe = l.getPrimaryHorizontal(n);
+                float pad = 12 * d;
+                if (x < Math.min(xs, xe) - pad || x > Math.max(xs, xe) + pad) return false;
+                int act = e.getActionMasked();
+                if (act == MotionEvent.ACTION_DOWN && v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
+                if (act == MotionEvent.ACTION_UP) {
+                    Object[] info = (Object[]) tag;
+                    Menu.showBadge(activityOf(v), (String) info[0], (Badge) info[1]);
+                }
+                return true;
+            } catch (Throwable t) {
+                return false;
+            }
+        }
+    };
 
     static Activity activityOf(View v) {
         Context c = v.getContext();

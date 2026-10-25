@@ -202,20 +202,6 @@ def patch_flags(text):
     return _METHOD_ANY.sub(per_method, text), found
 
 
-# ---- Google sign-in ---------------------------------------------------------------------------
-# Signing the app with our own key changes its certificate, and Google's sign-in through Play Services checks
-# package name + certificate, so the button ends in "developer error". TikTok has a second way in that it uses
-# when Play Services is missing: Google sign-in in the browser, which does not check the certificate. The app
-# chooses between the two by asking the class below whether Play Services is available. We answer "no".
-GOOGLE_AUTH_FILE = "com/bytedance/lobby/google/GoogleAuth.smali"
-_IS_AVAILABLE = re.compile(r"(\.method [^\n]*\bisAvailable\(\)Z\n)(.*?)(\.end method)", re.S)
-
-
-def patch_google_login(text):
-    return _IS_AVAILABLE.subn(
-        lambda m: m.group(1) + "    .locals 1\n    const/4 v0, 0x0\n    return v0\n" + m.group(3), text)
-
-
 def smali_files(root: Path):
     return [p for d in root.glob("smali*") if d.is_dir() for p in d.rglob("*.smali")]
 
@@ -249,7 +235,6 @@ def main(argv):
 
     calls = hosts = ads = files = feed = 0
     flags = {}
-    google = 0
     per = {}
     for f in smali_files(root):
         text = f.read_text(encoding="utf-8", errors="surrogateescape")
@@ -263,9 +248,6 @@ def main(argv):
             new, a1 = patch_feed_reads(new)
             new, a2 = patch_feed_methods(new)
             feed += a1 + a2
-        if f.as_posix().endswith(GOOGLE_AUTH_FILE):
-            new, g = patch_google_login(new)
-            google += g
         new, fl = patch_flags(new)
         for k, v in fl.items():
             flags[k] = flags.get(k, 0) + v
@@ -290,10 +272,6 @@ def main(argv):
     if not flags:
         print("    WARNING: none of the feature switches was found in this TikTok version, banner/repost cannot be switched on."
               " Send me report.txt.")
-    print(f"[6] Google sign-in switched to the browser way (works with a re-signed app): {google}")
-    if not google:
-        print("    WARNING: GoogleAuth.isAvailable() was not found in this TikTok version, Google sign-in may fail with a developer error."
-              " Use phone/email sign-in or send me report.txt.")
     print(f"    files changed: {files}")
     if calls == 0:
         print("error: found no SIM/region calls. This does not look like TikTok. Nothing is safe to ship.")

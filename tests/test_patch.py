@@ -113,5 +113,53 @@ with tempfile.TemporaryDirectory() as d:
     check(P.main(["p", str(r), "--no-ads"]) == 0 and "AdFilter" not in (r / "smali/F.smali").read_text(), "--no-ads leaves the feed alone")
 check(P.main(["p"]) == 2 and P.main(["p", "x", "--bogus"]) == 2, "bad arguments refused")
 
+# ---- experiment flags ------------------------------------------------------------------------
+FL = """.class public Lx/Y;
+.method public static a()Z
+    .locals 3
+    const-string v0, "profile_bg_in_allow_list"
+    const/4 v1, 0x0
+    invoke-static {v0, v1}, LX/Reader;->LIZ(Ljava/lang/String;Z)Z
+    move-result v1
+    return v1
+.end method
+.method public static b()I
+    .locals 2
+    const-string v0, "tt_comment_repost"
+    const/4 v1, 0x0
+    invoke-static {v0, v1}, LX/Reader;->LJ(Ljava/lang/String;I)I
+    move-result v1
+    return v1
+.end method
+.method public static c()Z
+    .locals 2
+    const-string v0, "some_other_flag"
+    const/4 v1, 0x0
+    invoke-static {v0, v1}, LX/Reader;->LIZ(Ljava/lang/String;Z)Z
+    move-result v1
+    return v1
+.end method
+.method public static d()Z
+    .locals 16
+    const-string v0, "enable_self_repost"
+    const/4 v1, 0x0
+    invoke-static {v0, v1}, LX/Reader;->LIZ(Ljava/lang/String;Z)Z
+    move-result v1
+    return v1
+.end method
+"""
+nt, found = P.patch_flags(FL)
+check(found == {"profile_bg_in_allow_list": 1, "tt_comment_repost": 1}, f"2 flag reads hooked, others not: {found}")
+check('const-string v3, "profile_bg_in_allow_list"\n    invoke-static {v3, v1}, Ldev/clean/Flags;->adjust(Ljava/lang/String;Z)Z\n    move-result v1' in nt, "boolean hook placed right after the result, new register v3")
+check("adjust(Ljava/lang/String;I)I" in nt, "int hook for the int reader")
+check(".locals 4" in nt and ".locals 3" in nt and ".locals 2\n    const-string v0, \"some_other_flag\"" in nt, "locals raised only in the two changed methods")
+check("some_other_flag" in nt and nt.count("Flags;->adjust") == 2, "unrelated flag untouched")
+check(".locals 16" in nt and "enable_self_repost" in nt and nt.count("v16") == 0, "method with too many registers left alone (safe)")
+check(P.patch_flags(".class LA;\n")[1] == {}, "no keys -> nothing")
+# the keys the patcher looks for are the same as the ones the Java side answers
+jt = (ROOT / "hooks" / "Flags.java").read_text()
+for k in P.FLAG_KEYS:
+    check('"%s"' % k in jt, f"Flags.java knows {k}")
+
 print("ALL PASSED" if not fails else f"{fails} FAILED")
 sys.exit(1 if fails else 0)

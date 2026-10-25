@@ -34,11 +34,14 @@ final class Net {
         new Thread(new Runnable() {
             @Override public void run() {
                 boolean ok = false;
-                String out;
+                String out = "";
+                // a weak or filtered connection often fails the first time: try up to three times
+                for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+                    if (attempt > 0) { try { Thread.sleep(1500L * attempt); } catch (InterruptedException ignored) { } }
                 try {
                     HttpURLConnection c = (HttpURLConnection) new URL(base() + path).openConnection();
-                    c.setConnectTimeout(10000);
-                    c.setReadTimeout(15000);
+                    c.setConnectTimeout(15000);
+                    c.setReadTimeout(20000);
                     c.setRequestMethod(method);
                     if (body != null) {
                         c.setDoOutput(true);
@@ -53,6 +56,8 @@ final class Net {
                     ok = code >= 200 && code < 300;
                 } catch (Throwable t) {
                     out = String.valueOf(t.getMessage());
+                }
+                    if (ok || (out.startsWith("{") && !out.isEmpty())) break;   // a real answer from the server is final
                 }
                 deliver(cb, ok, out);
             }

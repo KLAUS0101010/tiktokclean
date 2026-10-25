@@ -133,6 +133,8 @@ final class Menu {
     private void main() {
         screen("Меню мода", null);
         body.addView(item("🌍  Регион подмены", Store.region().label(), new Runnable() { @Override public void run() { regions(""); } }));
+        body.addView(item("🎨  Оформление", "Liquid Glass и Хэллоуин", new Runnable() { @Override public void run() { looks(); } }));
+        body.addView(item("⚙  Функции и лента", "баннер, репост комментариев, фильтр по лайкам", new Runnable() { @Override public void run() { functions(); } }));
         body.addView(item("⬇  Скачать видео", "без водяного знака, любое качество, с размером", new Runnable() { @Override public void run() { downloadScreen(""); } }));
         body.addView(item("♪  Получить ноту", "значок рядом с именем", new Runnable() { @Override public void run() { getNote(); } }));
         Badges.Update u = Badges.update;
@@ -186,6 +188,72 @@ final class Menu {
             });
             list.addView(t, lp);
         }
+    }
+
+    // -- looks and features
+    private void looks() {
+        screen("Оформление", toMain());
+        body.addView(toggle("Liquid Glass", "нижняя панель (Главная, Друзья, Профиль) в виде стеклянной плашки: прозрачная, с бликом и тонкой рамкой", Look.KEY_GLASS, true, true));
+        body.addView(toggle("Хэллоуин", "паутина в верхних углах, паучок и две маленькие тыквы внизу. Они прозрачные и не мешают нажимать", Look.KEY_HALLOWEEN, true, true));
+        body.addView(paragraph("Liquid Glass здесь имитация: настоящее размытие фона за панелью Android для приложений не даёт. Если панель не нашлась (у неё должны быть подписи Главная, Друзья, Профиль), тема просто не применится.", DIM));
+    }
+
+    private void functions() {
+        screen("Функции и лента", toMain());
+        body.addView(section("Рекомендации: минимум лайков"));
+        body.addView(paragraph("Видео с меньшим числом лайков не показываются, только в ленте рекомендаций (профили, поиск, подписки не трогаются). Если все видео в пачке слабые, пачка остаётся как есть.", DIM));
+        final int[] values = {0, 100, 500, 1000, 5000};
+        final String[] names = {"Выкл", "100", "500", "1 000", "5 000"};
+        final int cur = Store.number("min_likes", 100);
+        for (int i = 0; i < values.length; i++) {
+            final int v = values[i];
+            TextView t = text((v == cur ? "✓  " : "      ") + names[i], 16, v == cur ? ACCENT : TEXT);
+            t.setPadding(dp(14), dp(12), dp(14), dp(12));
+            t.setBackground(round(CARD, 10));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dp(6);
+            t.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View x) { Store.setNumber("min_likes", v); functions(); }
+            });
+            body.addView(t, lp);
+        }
+        body.addView(paragraph("Последний список: " + (AdFilter.lastNote.isEmpty() ? "ещё не было" : AdFilter.lastNote), DIM));
+        body.addView(section("Новые функции TikTok"));
+        body.addView(toggle("Баннер в профиле", "включить функцию, которую TikTok даёт не всем. Нужен перезапуск TikTok", "flag_banner", true, false));
+        body.addView(toggle("Репост комментариев", "включить функцию, которую TikTok даёт не всем. Нужен перезапуск TikTok", "flag_repost", true, false));
+        body.addView(paragraph("Эти переключатели лишь открывают кнопки в приложении. Если сервер TikTok не отдаёт аккаунту данные для функции, она может не заработать.", DIM));
+    }
+
+    /** A row with a name, an explanation and ВКЛ / ВЫКЛ. */
+    private View toggle(String name, String sub, final String key, boolean def, final boolean look) {
+        LinearLayout row = new LinearLayout(act);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackground(round(CARD, 12));
+        row.setPadding(dp(16), dp(12), dp(16), dp(12));
+        LinearLayout col = new LinearLayout(act);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.addView(text(name, 17, TEXT));
+        col.addView(text(sub, 12, DIM));
+        row.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        final TextView state = text(Store.flag(key, def) ? "ВКЛ" : "ВЫКЛ", 15, Store.flag(key, def) ? 0xFF7ED321 : DIM);
+        state.setTypeface(null, android.graphics.Typeface.BOLD);
+        state.setPadding(dp(10), 0, 0, 0);
+        row.addView(state);
+        final boolean d0 = def;
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                boolean now = !Store.flag(key, d0);
+                Store.setFlag(key, now);
+                state.setText(now ? "ВКЛ" : "ВЫКЛ");
+                state.setTextColor(now ? 0xFF7ED321 : DIM);
+                if (look) Look.apply(act);
+            }
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(10);
+        row.setLayoutParams(lp);
+        return row;
     }
 
     // -- download

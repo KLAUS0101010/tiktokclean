@@ -60,7 +60,9 @@ final class Download {
     static void fetch(final String link, final Info cb) {
         new Thread(new Runnable() {
             @Override public void run() {
-                VideoInfo info;
+                VideoInfo info = null;
+                for (int attempt = 0; attempt < 3; attempt++) {
+                    if (attempt > 0) { try { Thread.sleep(1500L * attempt); } catch (InterruptedException ignored) { } }
                 try {
                     HttpURLConnection c = open(link, "GET", 6);
                     if (c.getResponseCode() != 200) {
@@ -79,6 +81,8 @@ final class Download {
                 } catch (Throwable t) {
                     info = new VideoInfo();
                     info.error = "Нет связи с TikTok: " + t.getMessage();
+                }
+                    if (info.error == null || !info.error.startsWith("Нет связи")) break;   // only a dead connection is worth a retry
                 }
                 final VideoInfo r = info;
                 MAIN.post(new Runnable() { @Override public void run() { cb.done(r); } });

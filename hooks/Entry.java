@@ -34,6 +34,9 @@ final class Entry {
         started = true;
         try {
             Badges.load();
+            AdFilter.source = new AdFilter.Source() {
+                @Override public int minLikes() { return Store.number("min_likes", 100); }
+            };
             app.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
                 @Override public void onActivityResumed(Activity a) { resumed(a); }
                 @Override public void onActivityPaused(Activity a) { if (current == a) current = null; }
@@ -51,6 +54,7 @@ final class Entry {
         current = a;
         try {
             if (isSettings(a)) addBar(a);
+            Look.apply(a);
             watchLayout(a);
             Badges.refreshIfStale();
             Badges.Update u = Badges.update;
@@ -62,7 +66,9 @@ final class Entry {
     }
 
     private static boolean isSettings(Activity a) {
-        return a.getClass().getName().toLowerCase().contains("setting");
+        // the real main settings screen of TikTok (seen in the report of version 47.4.x); the many other
+        // "...Setting..." screens (ads, live, push) are left alone
+        return a.getClass().getName().endsWith("SettingContainerActivity");
     }
 
     /** The round "Меню мода" button at the bottom of every settings screen. */
@@ -145,6 +151,7 @@ final class Entry {
             @Override public void run() {
                 pending[0] = false;
                 try { Badges.decorate(decor); } catch (Throwable ignored) { }
+                try { Look.pass(decor); } catch (Throwable ignored) { }
             }
         };
         decor.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
@@ -154,6 +161,11 @@ final class Entry {
                 MAIN.postDelayed(job, 250);
             }
         });
+    }
+
+    /** Look at the screen once more in a moment (the note waits for a name that is not drawn yet). */
+    static void recheckSoon() {
+        MAIN.postDelayed(new Runnable() { @Override public void run() { redecorate(); } }, 800);
     }
 
     static void redecorate() {

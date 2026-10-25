@@ -49,4 +49,25 @@ final class Store {
         SharedPreferences p = sp();
         if (p != null) p.edit().putString(key, v).apply();
     }
+
+    /** A yes/no setting of the mod menu. */
+    static boolean flag(String key, boolean def) {
+        SharedPreferences p = sp();
+        return p == null ? def : p.getBoolean(key, def);
+    }
+
+    static void setFlag(String key, boolean v) {
+        SharedPreferences p = sp();
+        if (p != null) p.edit().putBoolean(key, v).apply();
+    }
+
+    static int number(String key, int def) {
+        SharedPreferences p = sp();
+        return p == null ? def : p.getInt(key, def);
+    }
+
+    static void setNumber(String key, int v) {
+        SharedPreferences p = sp();
+        if (p != null) p.edit().putInt(key, v).apply();
+    }
 }
