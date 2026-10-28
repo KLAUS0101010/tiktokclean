@@ -202,6 +202,141 @@ def patch_flags(text):
     return _METHOD_ANY.sub(per_method, text), found
 
 
+# ---- feature switches: hook the top of the app's flag readers ---------------------------------------
+# TikTok reads every server-side switch through a few small methods of one obfuscated class, one method per
+# value type, each taking (key, default). Whatever the class is called in this version, its shape is the same,
+# so we find it by shape and put one question at the top of every such method: "does the mod want to answer
+# this key?" (Flags.forcedX returns null for every key we do not care about, so nothing else changes).
+_READER_SIG = re.compile(r"\((Ljava/lang/String;)(Z|I|J|F|D|Ljava/lang/String;)\)(Z|I|J|F|D|Ljava/lang/String;)$")
+_FORCED = {
+    "Z": ("forcedBoolean", "Ljava/lang/Boolean;", "booleanValue()Z", ""),
+    "I": ("forcedInt", "Ljava/lang/Integer;", "intValue()I", ""),
+    "J": ("forcedLong", "Ljava/lang/Long;", "longValue()J", "-wide"),
+    "F": ("forcedFloat", "Ljava/lang/Float;", "floatValue()F", ""),
+    "D": ("forcedDouble", "Ljava/lang/Double;", "doubleValue()D", "-wide"),
+    "Ljava/lang/String;": ("forcedString", "Ljava/lang/String;", None, "-object"),
+}
+_READER_METHOD = re.compile(r"^\.method ([^\n]*?) ?([^\s(]+)(\([^)\n]*\)\S+)[ \t]*$", re.M)
+FLAG_HOOK_MARK = "# clean: flag reader"
+
+
+def reader_methods(text):
+    """Names of the (String, T) -> T methods of a class, with their descriptors."""
+    out = []
+    for m in _READER_METHOD.finditer(text):
+        mods, name, desc = m.groups()
+        if "abstract" in mods or "native" in mods or "constructor" in mods or name.startswith("<"):
+            continue
+        sm = _READER_SIG.match(desc)
+        if sm and sm.group(2) == sm.group(3):
+            out.append((name, desc))
+    return out
+
+
+def is_reader_class(text):
+    types = {d[-1] if not d.endswith("Ljava/lang/String;") else "S" for _, d in reader_methods(text)}
+    return len(types) >= 3
+
+
+def patch_flag_readers(text):
+    """Returns (new text, number of reader methods hooked)."""
+    if FLAG_HOOK_MARK in text or not is_reader_class(text):
+        return text, 0
+    count = [0]
+
+    def per_method(m):
+        head, body, end = m.groups()
+        hm = _READER_METHOD.match(head.rstrip("\n"))
+        if not hm:
+            return m.group(0)
+        mods, name, desc = hm.groups()
+        sm = _READER_SIG.match(desc)
+        if "abstract" in mods or "native" in mods or name.startswith("<") or not sm or sm.group(2) != sm.group(3):
+            return m.group(0)
+        t = sm.group(2)
+        lm = _LOCALS.search(body)
+        if not lm:
+            return m.group(0)
+        old = int(lm.group(2))
+        static = " static" in " " + mods + " "
+        key = old + 2 + (0 if static else 1)           # register of the key after we add two locals
+        if old + 1 > 15 or key > 15:
+            return m.group(0)
+        fn, box, unbox, kind = _FORCED[t]
+        a, b = f"v{old}", f"v{old + 1}"
+        lines = body.split("\n")
+        # insert before the first real instruction or label, after .locals / .param / .annotation blocks
+        i = next(k for k, l in enumerate(lines) if _LOCALS.match(l)) + 1
+        depth = 0
+        while i < len(lines):
+            s = lines[i].strip()
+            if s.startswith(".annotation"):
+                depth += 1
+            elif s.startswith(".end annotation"):
+                depth = max(0, depth - 1)
+            elif depth == 0 and s and (not s.startswith(".") or s.startswith(".line")):
+                break
+            i += 1
+        ind = "    "
+        ins = [
+            f"{ind}{FLAG_HOOK_MARK}",
+            f"{ind}invoke-static {{p{0 if static else 1}}}, {FLAGS_CLASS}->{fn}(Ljava/lang/String;){box}",
+            f"{ind}move-result-object {a}",
+            f"{ind}if-eqz {a}, :clean_flag",
+        ]
+        if unbox:
+            ins += [f"{ind}invoke-virtual {{{a}}}, {box}->{unbox}",
+                    f"{ind}move-result{kind} {a}",
+                    f"{ind}return{kind} {a}"]
+        else:
+            ins += [f"{ind}return-object {a}"]
+        ins += [f"{ind}:clean_flag"]
+        lines[i:i] = ins
+        new_body = "\n".join(lines)
+        new_body = _LOCALS.sub(lambda l: f"{l.group(1)}.locals {int(l.group(2)) + 2}", new_body, count=1)
+        count[0] += 1
+        return head + new_body + end
+
+    return _METHOD_ANY.sub(per_method, text), count[0]
+
+
+# ---- early start --------------------------------------------------------------------------------------
+_APP_ONCREATE = re.compile(r"(\.method [^\n]*\bonCreate\(\)V\n)(.*?)(\.end method)", re.S)
+BOOT_CALL = "invoke-static {}, Ldev/clean/Hooks;->boot()V"
+
+
+def patch_application(text):
+    """Start the mod at the top of Application.onCreate. Returns (text, 0 or 1)."""
+    if not re.search(r"^\.super Landroid/app/Application;", text, re.M) or BOOT_CALL in text:
+        return text, 0
+    n = [0]
+
+    def per(m):
+        head, body, end = m.groups()
+        lines = body.split("\n")
+        i = 0
+        while i < len(lines) and (not lines[i].strip() or lines[i].strip().startswith(".") and not lines[i].strip().startswith(".line")):
+            i += 1
+        lines.insert(i, "    " + BOOT_CALL)
+        n[0] = 1
+        return head + "\n".join(lines) + end
+    return _APP_ONCREATE.sub(per, text, count=1), n[0]
+
+
+# ---- Google sign-in ---------------------------------------------------------------------------
+# Signing the app with our own key changes its certificate, and Google's sign-in through Play Services checks
+# package name + certificate, so the button ends in "developer error". TikTok has a second way in that it uses
+# when Play Services is missing: Google sign-in in the browser, which does not check the certificate. The app
+# chooses between the two by asking the class below whether Play Services is available. We answer "no".
+GOOGLE_AUTH_FILE = "com/bytedance/lobby/google/GoogleAuth.smali"
+_IS_AVAILABLE = re.compile(r"(\.method [^\n]*\bisAvailable\(\)Z\n)(.*?)(\.end method)", re.S)
+
+
+def patch_google_login(text):
+    return _IS_AVAILABLE.subn(
+        lambda m: m.group(1) + "    .locals 1\n    const/4 v0, 0x0\n    return v0\n" + m.group(3), text)
+
+
 def smali_files(root: Path):
     return [p for d in root.glob("smali*") if d.is_dir() for p in d.rglob("*.smali")]
 
@@ -235,6 +370,9 @@ def main(argv):
 
     calls = hosts = ads = files = feed = 0
     flags = {}
+    google = 0
+    readers = []
+    boot = 0
     per = {}
     for f in smali_files(root):
         text = f.read_text(encoding="utf-8", errors="surrogateescape")
@@ -248,9 +386,17 @@ def main(argv):
             new, a1 = patch_feed_reads(new)
             new, a2 = patch_feed_methods(new)
             feed += a1 + a2
+        if f.as_posix().endswith(GOOGLE_AUTH_FILE):
+            new, g = patch_google_login(new)
+            google += g
         new, fl = patch_flags(new)
         for k, v in fl.items():
             flags[k] = flags.get(k, 0) + v
+        new, ap = patch_application(new)
+        boot += ap
+        new, rd = patch_flag_readers(new)
+        if rd:
+            readers.append((f.name, rd))
         if f.as_posix().endswith("ads/identifier/AdvertisingIdClient.smali"):
             new, a = patch_ad_id(new)
             ads += a
@@ -269,9 +415,17 @@ def main(argv):
     print(f"[5] feature switches (banner, comment repost) hooked: {sum(flags.values())} place(s)")
     for k in FLAG_KEYS:
         print(f"      {k}: {flags.get(k, 0)}")
-    if not flags:
-        print("    WARNING: none of the feature switches was found in this TikTok version, banner/repost cannot be switched on."
-              " Send me report.txt.")
+    print(f"    flag readers hooked at the top: {sum(n for _, n in readers)} method(s) in {len(readers)} class(es)")
+    for name, n in readers[:6]:
+        print(f"      {name}: {n}")
+    if not readers and not flags:
+        print("    WARNING: neither the flag-reader class nor any switch call was found in this TikTok version, banner/repost cannot be switched on."
+              " Send me the lines of [5] and report.txt.")
+    print(f"[5b] mod started from Application.onCreate: {boot}")
+    print(f"[6] Google sign-in switched to the browser way (works with a re-signed app): {google}")
+    if not google:
+        print("    WARNING: GoogleAuth.isAvailable() was not found in this TikTok version, Google sign-in may fail with a developer error."
+              " Use phone/email sign-in or send me report.txt.")
     print(f"    files changed: {files}")
     if calls == 0:
         print("error: found no SIM/region calls. This does not look like TikTok. Nothing is safe to ship.")

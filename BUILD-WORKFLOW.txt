@@ -47,11 +47,12 @@ jobs:
         run: |
           python3 -I tests/test_patch.py
           python3 -I tests/test_dex_api.py
-          mkdir -p out && javac -nowarn -d out hooks/Region.java hooks/Json.java hooks/LinkCleaner.java hooks/AdFilter.java hooks/VideoInfo.java tests/*.java
+          mkdir -p out && javac -nowarn -d out hooks/Region.java hooks/Json.java hooks/LinkCleaner.java hooks/AdFilter.java hooks/VideoInfo.java hooks/ServerAddress.java tests/*.java
           java -cp out dev.clean.RegionTest
           java -cp out dev.clean.LinkCleanerTest
           java -cp out dev.clean.AdFilterTest
           java -cp out dev.clean.VideoInfoTest
+          java -cp out dev.clean.ServerAddressTest
           (cd server && node worker.test.mjs)
           python3 -I tests/make_stubs.py stubsrc && mkdir -p stubout && javac -nowarn -d stubout $(find stubsrc -name '*.java')
           sed 's/__REGION__/NL/;s/__LOCALE__/true/;s/__BUILD__/1/;s|__SERVER__|https://x.dev|' hooks/Config.java.in > hooks/Config.java.tmp && mkdir -p chk && cp hooks/Config.java.tmp chk/Config.java && rm hooks/Config.java.tmp
